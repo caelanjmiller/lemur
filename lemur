@@ -204,7 +204,7 @@ class LemurRunEnv():
 
     def init_taxonomy(self):
         # Utilized Lazy API to scan CSV and wait to perform query operations; will be optimized by query planner when collected
-        self.df_taxonomy = pl.scan_csv(self.args.tax_path, separator='\t', has_header=True)
+        self.df_taxonomy: pl.LazyFrame = pl.scan_csv(self.args.tax_path, separator='\t', has_header=True)
         self.log(self.df_taxonomy)
         self.log(f"Loaded taxonomy file {self.args.tax_path}")
 
@@ -212,9 +212,9 @@ class LemurRunEnv():
     def init_F(self):
         '''Initializes the frequency vector F which represents the relative abundance of every species in the
         reference database.'''
-        self.F = pd.Series(data=[1. / len(self.df_taxonomy)] * len(self.df_taxonomy), 
-                           index=self.df_taxonomy.index,
-                           name="F")
+        # 'Instantiate' the dataframe by executing the query plan, in this case, simply collecting the taxonomic dataframe
+        collected_df_taxonomy: pl.DataFrame = self.df_taxonomy.collect()
+        self.F = pl.Series(name = "F", values = ([1.0 / collected_df_taxonomy.height] * collected_df_taxonomy.height), dtype = pl.Float32)
         self.log(f"Initialized abundance vector")
 
 
@@ -470,7 +470,7 @@ class LemurRunEnv():
         self.P_rgs_df.to_csv(f"{self.args.output}/P_rgs_df_raw.tsv", sep='\t', index=False)
 
         # Get gene-wise stats from the file `gene2len.tsv` and read them onto this dataframe...
-        self.gene_stats_df = pl.scan_csv(f"{self.args.db_prefix}/gene2len.tsv", separator='\t')
+        self.gene_stats_df: pl.LazyFrame = pl.scan_csv(f"{self.args.db_prefix}/gene2len.tsv", separator='\t', has_header=True)
         # Extract information via regex (e.g. dbs_refseq221_43markers/ValS) & (e.g. 1639)
         self.gene_stats_df.with_columns(
             pl.col("#id").str.extract(r'_.*_(.*):').alias("type"),
