@@ -14,9 +14,9 @@ import subprocess as subp
 from itertools import repeat
 from multiprocessing import Pool
 
-import pandas as pd
 import numpy as np
 import pysam
+import polars as pl
 
 
 __version__ = "1.0.1"
@@ -203,7 +203,8 @@ class LemurRunEnv():
 
 
     def init_taxonomy(self):
-        self.df_taxonomy = pd.read_csv(self.args.tax_path, sep='\t', index_col='tax_id', dtype=str)
+        # Utilized Lazy API to scan CSV and wait to perform query operations; will be optimized by query planner when collected
+        self.df_taxonomy = pl.scan_csv(self.args.tax_path, separator='\t', has_header=True)
         self.log(self.df_taxonomy)
         self.log(f"Loaded taxonomy file {self.args.tax_path}")
 
@@ -469,9 +470,12 @@ class LemurRunEnv():
         self.P_rgs_df.to_csv(f"{self.args.output}/P_rgs_df_raw.tsv", sep='\t', index=False)
 
         # Get gene-wise stats from the file `gene2len.tsv` and read them onto this dataframe...
-        self.gene_stats_df = pd.read_csv(f"{self.args.db_prefix}/gene2len.tsv", sep='\t')
-        self.gene_stats_df["type"] = self.gene_stats_df["#id"].str.split("_").str[-1].str.split(":").str[0]
-        self.gene_stats_df["Target_ID"] = self.gene_stats_df["#id"].str.split(":").str[0].astype(int)
+        self.gene_stats_df = pl.scan_csv(f"{self.args.db_prefix}/gene2len.tsv", separator='\t')
+        # Extract information via regex (e.g. dbs_refseq221_43markers/ValS) & (e.g. 1639)
+        self.gene_stats_df.with_columns(
+            pl.col("#id").str.extract(r'_.*_(.*):').alias("type"),
+            pl.col("#id").str.extract(r'^(.*?):').cast(pl.Int32).alias("Target_ID")
+            )
         gene_p_rgs_len_df = self.P_rgs_df.merge(self.gene_stats_df,
                                                 how="left", right_on="#id", left_on="Reference")
         gene_p_rgs_len_df["aln_len_ratio"] = gene_p_rgs_len_df["aln_len"] / gene_p_rgs_len_df["length"]
